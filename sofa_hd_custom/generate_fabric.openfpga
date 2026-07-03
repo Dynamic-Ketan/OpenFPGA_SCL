@@ -1,0 +1,79 @@
+# This script is designed to generate fabric Verilog netlists
+# with a fixed device layout
+# It will only output netlists to be used by backend tools,
+# i.e., Synopsys ICC2, including
+#   - Verilog netlists
+#   - fabric hierarchy description for ICC2's hierarchical flow
+#   - Timing/Design constraints
+#
+vpr ${VPR_ARCH_FILE} ${VPR_TESTBENCH_BLIF} --clock_modeling route --device ${OPENFPGA_VPR_DEVICE_LAYOUT} --route_chan_width ${OPENFPGA_VPR_ROUTE_CHAN_WIDTH} --absorb_buffer_luts off --skip_sync_clustering_and_routing_results on
+
+# Read OpenFPGA architecture definition
+read_openfpga_arch -f ${OPENFPGA_ARCH_FILE}
+
+# Read OpenFPGA simulation settings
+read_openfpga_simulation_setting -f ${OPENFPGA_SIM_SETTING_FILE}
+
+# Annotate the OpenFPGA architecture to VPR data base
+# to debug use --verbose options
+link_openfpga_arch --activity_file ${ACTIVITY_FILE} --sort_gsb_chan_node_in_edges
+
+# Build the module graph
+#  - Enabled compression on routing architecture modules
+#  - Enable pin duplication on grid modules
+build_fabric --compress_routing --duplicate_grid_pin 
+
+# Repack the netlist to physical pbs
+# This must be done before bitstream generator and testbench generation
+# Strongly recommend it is done after all the fix-up have been applied
+repack
+
+build_architecture_bitstream --write_file fabric_indepenent_bitstream.xml
+
+build_fabric_bitstream
+write_fabric_bitstream --format plain_text --file fabric_bitstream.bit
+write_fabric_bitstream --format xml --file fabric_bitstream.xml
+
+# Write the Verilog netlist for FPGA fabric
+#  - Enable the use of explicit port mapping in Verilog netlist
+write_fabric_verilog \
+    --file ./SRC \
+    --explicit_port_mapping \
+    --include_timing \
+    --verbose
+
+# Generate full testbench (with configuration phase)
+write_full_testbench \
+    --file ./SRC \
+    --reference_benchmark_file_path and2_output_verilog.v \
+    --bitstream fabric_bitstream.bit \
+    --fabric_netlist_file_path ./SRC/fpga_top.v
+
+# Generate preconfigured testbench (faster simulation)
+write_preconfigured_testbench \
+    --file ./SRC \
+    --reference_benchmark_file_path and2_output_verilog.v \
+    --fabric_netlist_file_path ./SRC/fpga_top.v
+
+# Generate simulation configuration file
+write_simulation_task_info \
+    --file ./SimulationDeck/simulation_deck.ini \
+    --hdl_dir ./SRC \
+    --reference_benchmark_file_path and2_output_verilog.v
+
+
+# Write the SDC files for PnR backend
+#  - Turn on every options here
+write_pnr_sdc --file ./SDC
+
+# Write SDC to disable timing for configure ports
+write_sdc_disable_timing_configure_ports --file ./SDC/disable_configure_ports.sdc
+
+# Write the SDC to run timing analysis for a mapped FPGA fabric
+write_analysis_sdc --file ./SDC_analysis
+
+# Finish and exit OpenFPGA
+exit
+
+# Note :
+# To run verification at the end of the flow maintain source in ./SRC directory
