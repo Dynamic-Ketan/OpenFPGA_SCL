@@ -1,0 +1,55 @@
+# Run VPR for the 'and' design
+#--write_rr_graph example_rr_graph.xml
+vpr ${VPR_ARCH_FILE} ${VPR_TESTBENCH_BLIF} --clock_modeling route --device ${OPENFPGA_VPR_DEVICE_LAYOUT} --route_chan_width ${OPENFPGA_VPR_ROUTE_CHAN_WIDTH}
+# Read OpenFPGA architecture definition
+read_openfpga_arch -f ${OPENFPGA_ARCH_FILE}
+# Read OpenFPGA simulation settings
+read_openfpga_simulation_setting -f ${OPENFPGA_SIM_SETTING_FILE}
+# Annotate the OpenFPGA architecture to VPR data base
+# to debug use --verbose options
+link_openfpga_arch --activity_file ${ACTIVITY_FILE} --sort_gsb_chan_node_in_edges
+# Check and correct any naming conflicts in the BLIF netlist
+check_netlist_naming_conflict --fix --report ./netlist_renaming.xml
+# Build the module graph
+#  - Enabled compression on routing architecture modules
+#  - Enable pin duplication on grid modules
+build_fabric --compress_routing #--verbose
+repack
+build_architecture_bitstream --write_file fabric_indepenent_bitstream.xml
+build_fabric_bitstream
+write_fabric_bitstream --format plain_text --file fabric_bitstream.bit
+write_fabric_bitstream --format xml --file fabric_bitstream.xml
+write_fabric_verilog \
+    --file ./SRC \
+    --explicit_port_mapping \
+    --include_timing \
+    --verbose
+write_preconfigured_fabric_wrapper --file ./SRC --embed_bitstream iverilog --explicit_port_mapping
+write_full_testbench \
+    --file ./SRC \
+    --reference_benchmark_file_path and2_output_verilog.v \
+    --bitstream fabric_bitstream.bit \
+    --fabric_netlist_file_path ./fpga_top.v
+write_preconfigured_testbench \
+    --file ./SRC \
+    --reference_benchmark_file_path and2_output_verilog.v \
+    --fabric_netlist_file_path ./fpga_top.v
+write_analysis_sdc --file ./SDC_analysis
+# Write the fabric hierarchy of module graph to a file
+# This is used by hierarchical PnR flows
+write_fabric_hierarchy --file ./fabric_hierarchy.txt
+# Write the fabric I/O attributes to a file
+# This is used by pin constraint files
+write_fabric_io_info --file ./fabric_io_location.xml --verbose
+# Write the Verilog netlist for FPGA fabric
+#  - Enable the use of explicit port mapping in Verilog netlist
+write_fabric_verilog --file ${OPENFPGA_VERILOG_OUTPUT_DIR}/SRC --explicit_port_mapping --include_timing --print_user_defined_template --verbose
+# Write the SDC files for PnR backend
+#  - Turn on every options here
+write_pnr_sdc --file ./SDC
+# Write SDC to disable timing for configure ports
+write_sdc_disable_timing_configure_ports --file ./SDC/disable_configure_ports.sdc
+# Finish and exit OpenFPGA
+exit
+# Note :
+# To run verification at the end of the flow maintain source in ./SRC directory
